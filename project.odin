@@ -52,6 +52,7 @@ load_project :: proc() -> (project: Project, status: Load_Project_Status) {
 
 
     conf_file_contents, err3 := os.read_entire_file(conf_path, context.allocator)
+    defer delete(conf_file_contents)
 
     if err3 != os.General_Error.None {
         status = Load_Project_Status.ConfReadError

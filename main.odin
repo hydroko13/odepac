@@ -85,6 +85,7 @@ run_project_command :: proc() {
 	}
 
 	temp_directory, mkdir_err := os.make_directory_temp(cwd, "t", context.allocator)
+	defer delete(temp_directory)
 
 	if mkdir_err != os.General_Error.None {
 		return
@@ -94,6 +95,7 @@ run_project_command :: proc() {
 	fmt.printfln("Using temp dir %s ", temp_directory)
 
 	joined_path, jerr := os.join_path({temp_directory, project.name}, context.allocator)
+	defer delete(joined_path)
 
 	if jerr != nil {
 		fmt.printfln("Command failed with error: %s", jerr)
@@ -153,8 +155,10 @@ run_project_command :: proc() {
 	os.close(compile_errs_pipe_write)
 
 	pipe_as_stream := os.to_stream(compile_errs_pipe_read)
+	defer io.destroy(pipe_as_stream)
 
 	compile_errs_buf := make([dynamic]byte)
+	defer delete(compile_errs_buf)
 
     immediate_eof: bool
     just_started_reading := true
@@ -200,6 +204,7 @@ run_project_command :: proc() {
 
 
 	temp_directory2, mkdir_err3 := os.make_directory_temp(cwd, "t", context.allocator)
+	defer delete(temp_directory2)
 
 	if mkdir_err3 != os.General_Error.None {
 
@@ -213,6 +218,7 @@ run_project_command :: proc() {
 		{temp_directory, project.name, "project.exe"},
 		context.allocator,
 	)
+	defer delete(exec_path)
 
 	if jerr2 != nil {
 		fmt.printfln("Command failed with error: %s", jerr2)
@@ -223,6 +229,7 @@ run_project_command :: proc() {
 
 	when ODIN_OS == .Windows {
 		out_exec_name, concaterr := strings.concatenate({project.name, ".exe"})
+		defer delete(out_exec_name)
 		if concaterr != nil {
 			fmt.printfln("Command failed with error: %s", concaterr)
 
@@ -235,6 +242,7 @@ run_project_command :: proc() {
 
 
 	out_exec_path, jerr3 := os.join_path({temp_directory2, out_exec_name}, context.allocator)
+	defer delete(out_exec_path)
 
 	if jerr3 != nil {
 		fmt.printfln("Command failed with error: %s", jerr3)
@@ -353,6 +361,8 @@ main :: proc() {
 	} else if command == .Debug {
 		fmt.println("Building project... mode - Debug")
 	}
+
+	
 
 
 }
