@@ -1,5 +1,6 @@
 package main
 
+import "core:mem"
 import "core:fmt"
 import "core:io"
 import "core:os"
@@ -12,6 +13,44 @@ Odepac_Command :: enum {
 	Debug,
 }
 
+
+ensure_odepac_global_directories :: proc() -> (ok: bool, odepac_path, lib_path: string, mustdealloc1, mustdealloc2: bool) {
+	home_dir, err := os.user_home_dir(context.allocator)
+	defer delete(home_dir)
+	if err != os.General_Error.None {
+		return false, "", "", false, false
+	}
+	odepac_dir, odepac_dir_err := os.join_path({home_dir, ".odepac"}, context.allocator)
+
+	if odepac_dir_err != nil {
+		return false, odepac_dir, "", true, false
+	}
+	odepac_lib_dir, odepac_lib_dir_err := os.join_path({odepac_dir, "libs"}, context.allocator)
+
+	if odepac_lib_dir_err != nil {
+		return false, odepac_dir, odepac_lib_dir, true, true
+	}
+	mkdir_err1 := os.make_directory(odepac_dir)
+	if mkdir_err1 == .Exist {
+		fmt.println(".odepac dir FOUND")
+	} else if mkdir_err1 != os.General_Error.None {
+		return false, odepac_dir, odepac_lib_dir, true, true
+	} else {
+		fmt.println(".odepac dir CREATED")
+	}
+
+	mkdir_err2 := os.make_directory(odepac_lib_dir)
+	if mkdir_err2 == .Exist {
+		fmt.println(".odepac/libs dir FOUND")
+	} else if mkdir_err2 != os.General_Error.None {
+		return false, odepac_dir, odepac_lib_dir, true, true
+	} else {
+		fmt.println(".odepac/libs dir CREATED")
+	}
+	
+
+	return true, odepac_dir, odepac_lib_dir, true, true
+}
 
 run_project_command :: proc() {
 	project, load_status := load_project()
@@ -33,6 +72,8 @@ run_project_command :: proc() {
 
 		return
 	}
+
+
 
 	src_path, err2 := os.join_path({cwd, "src"}, context.allocator)
 	defer delete(src_path)
@@ -250,7 +291,45 @@ build_project_command :: proc() {
 }
 
 main :: proc() {
+	
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	context.allocator = mem.tracking_allocator(&track)
+
+	defer {
+		if len(track.allocation_map) > 0 {
+			fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+			for _, entry in track.allocation_map {
+				fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+			}
+		}
+		if len(track.bad_free_array) > 0 {
+			fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+			for entry in track.bad_free_array {
+				fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+			}
+		}
+		mem.tracking_allocator_destroy(&track)
+	}
+	
 	fmt.println("Odepac v0.1")
+
+
+
+	gsuccess, godepac_dir, glib_dir, gda1, gda2 := ensure_odepac_global_directories()
+	if gda1 {
+		defer delete(godepac_dir)
+	}
+	if gda2 {
+		defer delete(glib_dir)
+	}
+
+	if !gsuccess {
+		fmt.println("Ensure global directories failed, error...")
+		return
+	}
+
+
 
 	command: Odepac_Command
 	args_count := len(os.args[1:])
