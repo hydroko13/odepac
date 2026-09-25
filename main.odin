@@ -1,8 +1,9 @@
 package main
 
-import "core:mem"
+import "core:compress/gzip"
 import "core:fmt"
 import "core:io"
+import "core:mem"
 import "core:os"
 import "core:strings"
 
@@ -14,7 +15,12 @@ Odepac_Command :: enum {
 }
 
 
-ensure_odepac_global_directories :: proc() -> (ok: bool, odepac_path, lib_path: string, mustdealloc1, mustdealloc2: bool) {
+ensure_odepac_global_directories :: proc(
+) -> (
+	ok: bool,
+	odepac_path, lib_path: string,
+	mustdealloc1, mustdealloc2: bool,
+) {
 	home_dir, err := os.user_home_dir(context.allocator)
 	defer delete(home_dir)
 	if err != os.General_Error.None {
@@ -47,12 +53,12 @@ ensure_odepac_global_directories :: proc() -> (ok: bool, odepac_path, lib_path: 
 	} else {
 		fmt.println(".odepac/libs dir CREATED")
 	}
-	
+
 
 	return true, odepac_dir, odepac_lib_dir, true, true
 }
 
-run_project_command :: proc() {
+run_project_command :: proc(lib_dir_path: string) {
 	project, load_status := load_project()
 	defer unload_project(&project)
 	if load_status != .Success {
@@ -72,7 +78,6 @@ run_project_command :: proc() {
 
 		return
 	}
-
 
 
 	src_path, err2 := os.join_path({cwd, "src"}, context.allocator)
@@ -120,6 +125,13 @@ run_project_command :: proc() {
 		return
 	}
 
+	dep_dir_path, prepare_deps_ok := prepare_dependencies(&project, temp_directory, lib_dir_path)
+	defer delete(dep_dir_path)
+	if !prepare_deps_ok {
+		fmt.println("Prepare dependencies failed!")
+		return
+	}
+
 	compile_errs_pipe_read, compile_errs_pipe_write, pipe_err := os.pipe()
 
 	if pipe_err != os.General_Error.None {
@@ -129,9 +141,12 @@ run_project_command :: proc() {
 
 	defer os.close(compile_errs_pipe_read)
 
+	collection_flag_joined := strings.concatenate({"-collection:odepac=", dep_dir_path}, context.allocator)
+	defer delete(collection_flag_joined)
+
 	build_process_desc := os.Process_Desc {
 		working_dir = joined_path,
-		command     = {"odin", "build", "-out:project.exe", "."},
+		command     = {"odin", "build", "-out:project.exe", collection_flag_joined, "."},
 		stdout      = os.stdout,
 		stderr      = compile_errs_pipe_write,
 	}
@@ -148,9 +163,9 @@ run_project_command :: proc() {
 	if wait_err != os.General_Error.None {
 		fmt.printfln("Command failed with error: %s", wait_err)
 		return
-    }
+	}
 
-    fmt.printfln("Odin build command finished with exit code %d", pstate.exit_code)
+	fmt.printfln("Odin build command finished with exit code %d", pstate.exit_code)
 
 	os.close(compile_errs_pipe_write)
 
@@ -160,47 +175,44 @@ run_project_command :: proc() {
 	compile_errs_buf := make([dynamic]byte)
 	defer delete(compile_errs_buf)
 
-    immediate_eof: bool
-    just_started_reading := true
+	immediate_eof: bool
+	just_started_reading := true
 
-    for {
-        b, read_err := io.read_byte(pipe_as_stream)
-        if read_err == .EOF {
-            if just_started_reading {
-                immediate_eof = true
-            } else {
-                immediate_eof = false
-            }
-            break
-        } else if read_err != nil {
-            fmt.printfln("Command failed with error: %s", read_err)
-            return
-        }
+	for {
+		b, read_err := io.read_byte(pipe_as_stream)
+		if read_err == .EOF {
+			if just_started_reading {
+				immediate_eof = true
+			} else {
+				immediate_eof = false
+			}
+			break
+		} else if read_err != nil {
+			fmt.printfln("Command failed with error: %s", read_err)
+			return
+		}
 
-        append(&compile_errs_buf, b)
-        just_started_reading = false
-    }
-
-
-
-    if immediate_eof {
-        fmt.println("Compiled without errors!")
-    } else {
-        fmt.println("ERRORS: ")
-        fmt.println(string(compile_errs_buf[:]))
-
-        remove_err := os.remove_all(temp_directory)
-        if remove_err != os.General_Error.None {
-            fmt.printfln("Remove temp dir failed with error: %s", remove_err)
-
-            
-        }
-        
-        return
-
-    }
+		append(&compile_errs_buf, b)
+		just_started_reading = false
+	}
 
 
+	if immediate_eof {
+		fmt.println("Compiled without errors!")
+	} else {
+		fmt.println("ERRORS: ")
+		fmt.println(string(compile_errs_buf[:]))
+
+		remove_err := os.remove_all(temp_directory)
+		if remove_err != os.General_Error.None {
+			fmt.printfln("Remove temp dir failed with error: %s", remove_err)
+
+
+		}
+
+		return
+
+	}
 
 
 	temp_directory2, mkdir_err3 := os.make_directory_temp(cwd, "t", context.allocator)
@@ -285,12 +297,12 @@ run_project_command :: proc() {
 		return
 	}
 
-    remove_err2 := os.remove_all(temp_directory2)
-    if remove_err2 != os.General_Error.None {
-        fmt.printfln("Remove temp dir failed with error: %s", remove_err2)
+	remove_err2 := os.remove_all(temp_directory2)
+	if remove_err2 != os.General_Error.None {
+		fmt.printfln("Remove temp dir failed with error: %s", remove_err2)
 
-        
-    }
+
+	}
 
 }
 
@@ -299,7 +311,7 @@ build_project_command :: proc() {
 }
 
 main :: proc() {
-	
+
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
 	context.allocator = mem.tracking_allocator(&track)
@@ -319,24 +331,29 @@ main :: proc() {
 		}
 		mem.tracking_allocator_destroy(&track)
 	}
-	
+
 	fmt.println("Odepac v0.1")
 
 
-
 	gsuccess, godepac_dir, glib_dir, gda1, gda2 := ensure_odepac_global_directories()
-	if gda1 {
-		defer delete(godepac_dir)
+	defer {
+		if gda1 {
+			delete(godepac_dir)
+		}
+
 	}
-	if gda2 {
-		defer delete(glib_dir)
+	defer {
+		if gda2 {
+			delete(glib_dir)
+		}
+
 	}
+
 
 	if !gsuccess {
 		fmt.println("Ensure global directories failed, error...")
 		return
 	}
-
 
 
 	command: Odepac_Command
@@ -355,14 +372,12 @@ main :: proc() {
 
 	if command == .Run {
 		fmt.println("Running project...")
-		run_project_command()
+		run_project_command(glib_dir)
 	} else if command == .Release {
 		fmt.println("Building project... mode - Release")
 	} else if command == .Debug {
 		fmt.println("Building project... mode - Debug")
 	}
-
-	
 
 
 }

@@ -1,4 +1,7 @@
 {
     "project": "test",
-    "project_type": "application"
+    "project_type": "application",
+    "deps": [
+        "mymath"
+    ]
 }

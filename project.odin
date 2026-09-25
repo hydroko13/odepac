@@ -7,7 +7,8 @@ import "core:os"
 @(private="file")
 Odepac_Conf_JsonData :: struct {
     project: string,
-    project_type: string
+    project_type: string,
+    deps: []string
 }
 
 Load_Project_Status :: enum {
@@ -26,7 +27,8 @@ ProjectType :: enum {
 Project :: struct {
     name: string,
     type: ProjectType,
-    load_success: bool
+    load_success: bool,
+    deps: []string
 
 }
 
@@ -62,9 +64,9 @@ load_project :: proc() -> (project: Project, status: Load_Project_Status) {
     json_data: Odepac_Conf_JsonData
 
     parse_err := json.unmarshal(conf_file_contents, &json_data)
-
     defer delete(json_data.project)
     defer delete(json_data.project_type)
+    
 
     
 
@@ -77,6 +79,7 @@ load_project :: proc() -> (project: Project, status: Load_Project_Status) {
 
     project_name_cloned := strings.clone(json_data.project)
     project.name = project_name_cloned
+    project.deps = json_data.deps
 
     if json_data.project_type == "application" {
         project.type = .Application
@@ -95,5 +98,9 @@ load_project :: proc() -> (project: Project, status: Load_Project_Status) {
 unload_project :: proc(project: ^Project) {
     if project.load_success {
         delete(project.name)
+        for dep_str in project.deps {
+            delete(dep_str)
+        }
+        delete(project.deps)
     }
 }
