@@ -4,7 +4,6 @@ import "core:fmt"
 import "core:io"
 import "core:os"
 import "core:strings"
-import "core:sys/valgrind"
 
 
 Odepac_Command :: enum {
